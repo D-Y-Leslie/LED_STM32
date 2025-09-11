@@ -391,78 +391,115 @@ static void MX_GPIO_Init(void)
 
 void draw_waveform(u8g2_t* u8g2, uint8_t* data, const char* title, int zoom, DisplayMode mode)
 {
-  char buffer[20]; // 一个通用的字符串缓冲区
+  char buffer[20];
 
   // 1. 清空缓冲区
   u8g2_ClearBuffer(u8g2);
 
-  // 2. 绘制全新的顶部状态栏
-  u8g2_SetFont(u8g2, u8g2_font_ncenB08_tr); // 设置状态栏字体
-
-  // 【修改点】将标题和实时数值合并显示在左侧
+  // 2. 绘制顶部状态栏 (逻辑不变)
+  u8g2_SetFont(u8g2, u8g2_font_ncenB08_tr);
   uint8_t current_raw_value = data[data_offset + GRAPH_WIDTH / 2];
   if (mode == DISPLAY_HEART_RATE) {
       int current_hr = 60 + (current_raw_value / 4);
       sprintf(buffer, "HR: %d bpm", current_hr);
-  } else { // DISPLAY_TEMPERATURE
+  } else {
       float current_temp = 35.0f + (current_raw_value / 5.0f);
-      sprintf(buffer, "Temp: %.1fC", current_temp); // 使用 %.1f 并开启了浮点支持
+      sprintf(buffer, "Temp: %.1fC", current_temp);
   }
-  u8g2_DrawStr(u8g2, 2, 10, buffer); // 在左上角绘制
-
-  // 【修改点】将Zoom/Pan状态显示在状态栏右侧
+  u8g2_DrawStr(u8g2, 2, 10, buffer);
   if (control_mode == MODE_ZOOM) {
       sprintf(buffer, "Zoom:x%d", zoom);
-  } else { // MODE_PAN
+  } else {
       sprintf(buffer, "Pan:%ld", data_offset);
   }
   u8g2_uint_t str_width = u8g2_GetStrWidth(u8g2, buffer);
-  u8g2_DrawStr(u8g2, 127 - str_width, 10, buffer); // 在右上角绘制
-
-  // 绘制状态栏下方的分割线
+  u8g2_DrawStr(u8g2, 127 - str_width, 10, buffer);
   u8g2_DrawHLine(u8g2, 0, 12, 128);
 
-
-  // 3. 绘制坐标轴 (这部分代码保持不变)
+  // 3. 绘制坐标轴框架 (逻辑不变)
   u8g2_DrawVLine(u8g2, GRAPH_X_START, GRAPH_Y_START, GRAPH_HEIGHT);
   u8g2_DrawHLine(u8g2, GRAPH_X_START, GRAPH_Y_END, GRAPH_WIDTH);
 
+  // ====================================================================
+  // 【核心修改】围绕动态中心点进行缩放
+  // ====================================================================
+  float y_max, y_mid, y_min;
+  float dynamic_center; // <<< NEW: 定义动态中心变量
 
-  // 4. 绘制坐标轴刻度与标签 (这部分代码保持不变)
-  u8g2_SetFont(u8g2, u8g2_font_t0_11_tr);
+  // <<< NEW: 获取屏幕中心点对应的原始数据值
+  uint8_t raw_center_value = data[data_offset + GRAPH_WIDTH / 2];
+
   if (mode == DISPLAY_HEART_RATE) {
-      u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + 5, "120");
-      u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + GRAPH_HEIGHT / 2, "90");
-      u8g2_DrawStr(u8g2, 0, GRAPH_Y_END, "60");
-  } else {
-      u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + 5, "42");
-      u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + GRAPH_HEIGHT / 2, "38");
-      u8g2_DrawStr(u8g2, 0, GRAPH_Y_END, "35");
+      const float base_min = 60.0f;
+      const float base_max = 120.0f;
+      
+      // <<< MODIFIED: 计算动态中心点的真实物理值
+      dynamic_center = 60.0f + (raw_center_value / 4.0f);
+
+      float span = (base_max - base_min) / zoom; // 新的跨度
+      
+      // <<< MODIFIED: 围绕动态中心点计算Y轴范围
+      y_max = dynamic_center + span / 2.0f;
+      y_min = dynamic_center - span / 2.0f;
+      y_mid = dynamic_center;
+
+      // 绘制动态标签
+      u8g2_SetFont(u8g2, u8g2_font_t0_11_tr);
+      sprintf(buffer, "%.0f", y_max); u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + 5, buffer);
+      sprintf(buffer, "%.0f", y_mid); u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + GRAPH_HEIGHT / 2, buffer);
+      sprintf(buffer, "%.0f", y_min); u8g2_DrawStr(u8g2, 0, GRAPH_Y_END, buffer);
+  } else { // DISPLAY_TEMPERATURE
+      const float base_min = 35.0f;
+      const float base_max = 42.0f;
+
+      // <<< MODIFIED: 计算动态中心点的真实物理值
+      dynamic_center = 35.0f + (raw_center_value / 5.0f);
+
+      float span = (base_max - base_min) / zoom;
+      
+      // <<< MODIFIED: 围绕动态中心点计算Y轴范围
+      y_max = dynamic_center + span / 2.0f;
+      y_min = dynamic_center - span / 2.0f;
+      y_mid = dynamic_center;
+
+      // 绘制动态标签
+      u8g2_SetFont(u8g2, u8g2_font_t0_11_tr);
+      sprintf(buffer, "%.1f", y_max); u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + 5, buffer);
+      sprintf(buffer, "%.1f", y_mid); u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + GRAPH_HEIGHT / 2, buffer);
+      sprintf(buffer, "%.1f", y_min); u8g2_DrawStr(u8g2, 0, GRAPH_Y_END, buffer);
   }
+
+  // 绘制X轴标签 (逻辑不变)
+  u8g2_uint_t label_width = u8g2_GetStrWidth(u8g2, "10s");
   u8g2_DrawStr(u8g2, GRAPH_X_START, 127, "0s");
   u8g2_DrawStr(u8g2, GRAPH_X_START + GRAPH_WIDTH / 2 - 5, 127, "5s");
-  // 【修改点】精确计算 "10s" 标签的位置，使其右对齐
-  u8g2_uint_t label_width = u8g2_GetStrWidth(u8g2, "10s");
   u8g2_DrawStr(u8g2, GRAPH_X_START + GRAPH_WIDTH - label_width, 127, "10s");
 
+  // 波形映射和绘制部分完全不需要修改，因为它已经使用了 y_min 和 y_max，
+  // 现在这两个值是动态的，所以绘制会自动适应。
+  for (int x = 0; x < GRAPH_WIDTH - 1; x++) {
+      uint8_t raw_val1 = data[x + data_offset];
+      uint8_t raw_val2 = data[x + 1 + data_offset];
 
-  // 5. 绘制波形 (这部分代码保持不变)
-  for (int x = 0; x < GRAPH_WIDTH -1; x++) {
-      uint8_t raw_y1 = data[x + data_offset];
-      uint8_t raw_y2 = data[x + 1 + data_offset];
-      int y1 = GRAPH_Y_END - (raw_y1 * GRAPH_HEIGHT / 64);
-      int y2 = GRAPH_Y_END - (raw_y2 * GRAPH_HEIGHT / 64);
-      int center_y = GRAPH_Y_END - (GRAPH_HEIGHT / 2) * (1.0/zoom);
-      y1 = center_y - (center_y - y1) * zoom;
-      y2 = center_y - (center_y - y2) * zoom;
-      if(y1 < GRAPH_Y_START) y1 = GRAPH_Y_START;
-      if(y1 > GRAPH_Y_END) y1 = GRAPH_Y_END;
-      if(y2 < GRAPH_Y_START) y2 = GRAPH_Y_START;
-      if(y2 > GRAPH_Y_END) y2 = GRAPH_Y_END;
+      float real_val1, real_val2;
+      if (mode == DISPLAY_HEART_RATE) {
+          real_val1 = 60.0f + (raw_val1 / 4.0f);
+          real_val2 = 60.0f + (raw_val2 / 4.0f);
+      } else {
+          real_val1 = 35.0f + (raw_val1 / 5.0f);
+          real_val2 = 35.0f + (raw_val2 / 5.0f);
+      }
+
+      float y_span = y_max - y_min;
+      if (y_span < 0.001) y_span = 0.001;
+
+      int y1 = GRAPH_Y_END - (int)((real_val1 - y_min) * GRAPH_HEIGHT / y_span);
+      int y2 = GRAPH_Y_END - (int)((real_val2 - y_min) * GRAPH_HEIGHT / y_span);
+
       u8g2_DrawLine(u8g2, GRAPH_X_START + x, y1, GRAPH_X_START + x + 1, y2);
   }
 
-  // 6. 将缓冲区内容发送到屏幕
+  // 5. 将缓冲区内容发送到屏幕
   u8g2_SendBuffer(u8g2);
 }
 

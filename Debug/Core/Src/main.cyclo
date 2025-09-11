@@ -3,5 +3,5 @@
 ../Core/Src/main.c:267:13:MX_SPI2_Init	2
 ../Core/Src/main.c:307:13:MX_TIM16_Init	2
 ../Core/Src/main.c:339:13:MX_GPIO_Init	1
-../Core/Src/main.c:392:6:draw_waveform	11
-../Core/Src/main.c:475:6:Error_Handler	1
+../Core/Src/main.c:392:6:draw_waveform	7
+../Core/Src/main.c:512:6:Error_Handler	1
