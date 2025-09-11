@@ -4,4 +4,4 @@
 ../Core/Src/main.c:302:13:MX_TIM16_Init	2
 ../Core/Src/main.c:334:13:MX_GPIO_Init	1
 ../Core/Src/main.c:386:6:draw_waveform	8
-../Core/Src/main.c:456:6:Error_Handler	1
+../Core/Src/main.c:449:6:Error_Handler	1

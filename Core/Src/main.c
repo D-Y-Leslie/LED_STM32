@@ -85,7 +85,7 @@ static void MX_GPIO_Init(void);
 static void MX_TIM16_Init(void);
 static void MX_SPI2_Init(void);
 /* USER CODE BEGIN PFP */
-void draw_waveform(u8g2_t* u8g2, uint8_t* data, const char* title, int zoom); 
+void draw_waveform(u8g2_t* u8g2, uint8_t* data, const char* title, int zoom, DisplayMode mode);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -197,9 +197,9 @@ for(int i=0; i<WAVEFORM_LENGTH; i++) {
 
   // --- 根据状态更新显示 ---
   if (current_mode == DISPLAY_HEART_RATE) {
-      draw_waveform(&u8g2, mock_heart_rate_data, "Heart Rate", zoom_level);
+      draw_waveform(&u8g2, mock_heart_rate_data, "Heart Rate", zoom_level, current_mode);
   } else {
-      draw_waveform(&u8g2, mock_temp_data, "Temperature", zoom_level);
+      draw_waveform(&u8g2, mock_temp_data, "Temperature", zoom_level, current_mode);
   }
 
   HAL_Delay(50); // 主循环不需要太快，给其他任务留出时间
@@ -383,7 +383,7 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void draw_waveform(u8g2_t* u8g2, uint8_t* data, const char* title, int zoom)
+void draw_waveform(u8g2_t* u8g2, uint8_t* data, const char* title, int zoom, DisplayMode mode)
 {
   // 先清除缓冲区
   u8g2_ClearBuffer(u8g2);
@@ -401,26 +401,21 @@ void draw_waveform(u8g2_t* u8g2, uint8_t* data, const char* title, int zoom)
       u8g2_DrawStr(u8g2, 127 - str_width, 10, zoom_str);
   } else { // MODE_PAN
       char pan_str[15];
-      // 注意: %ld 用于打印 long int, 我们的 data_offset 是 int32_t
       sprintf(pan_str, "Pan: %ld", data_offset);
       u8g2_uint_t str_width = u8g2_GetStrWidth(u8g2, pan_str);
       u8g2_DrawStr(u8g2, 127 - str_width, 10, pan_str);
   }
   u8g2_DrawHLine(u8g2, 0, 12, 128); // 状态栏下方的分割线
 
-  // --- 2. 绘制背景网格和Y轴 ---
-  // 绘制垂直网格线
-  for (int x = 0; x < 128; x += 16) {
-      u8g2_DrawVLine(u8g2, x, 14, 114);
-  }
-  // 绘制Y轴 (加粗一点)
+  // --- 2. 绘制Y轴 ---
+  // 【修改点】移除了绘制背景网格的循环，只保留一根Y轴
   u8g2_DrawVLine(u8g2, 5, 14, 114);
-  u8g2_DrawVLine(u8g2, 6, 14, 114);
 
 
   // --- 3. 绘制波形 ---
   for (int x = 0; x < 127; x++) { // 循环到127，避免 data[x+1] 越界
       // 从数据缓冲区中根据偏移量取值
+      // 注意：这里的Y轴计算逻辑保持不变
       int y1 = 64 - (data[x + data_offset] - 32) * zoom;
       int y2 = 64 - (data[x + 1 + data_offset] - 32) * zoom;
 
@@ -433,16 +428,14 @@ void draw_waveform(u8g2_t* u8g2, uint8_t* data, const char* title, int zoom)
       u8g2_DrawLine(u8g2, x, y1, x + 1, y2);
   }
 
-  // --- 4. 绘制Y轴刻度值 (最后绘制，确保在最上层) ---
-  char val_str[10];
-  float max_val = 1.65f + 1.65f / zoom;
-  float min_val = 1.65f - 1.65f / zoom;
-  // 使用更小的字体显示坐标值
-  u8g2_SetFont(u8g2, u8g2_font_t0_11_tr);
-  sprintf(val_str, "%.1fV", max_val);
-  u8g2_DrawStr(u8g2, 8, 24, val_str); // 在轴顶部附近显示
-  sprintf(val_str, "%.1fV", min_val);
-  u8g2_DrawStr(u8g2, 8, 125, val_str); // 在轴底部附近显示
+  // --- 4. 绘制Y轴单位 (最后绘制，确保在最上层) ---
+  // 【修改点】根据传入的 mode 决定显示 'H' 还是 'T'，并移除了底部的单位
+  u8g2_SetFont(u8g2, u8g2_font_t0_11_tr); // 使用小字体
+  if (mode == DISPLAY_HEART_RATE) {
+      u8g2_DrawStr(u8g2, 8, 24, "H"); // 在轴顶部附近显示 'H'
+  } else { // DISPLAY_TEMPERATURE
+      u8g2_DrawStr(u8g2, 8, 24, "T"); // 在轴顶部附近显示 'T'
+  }
 
   // --- 5. 将缓冲区内容发送到屏幕 ---
   u8g2_SendBuffer(u8g2);
