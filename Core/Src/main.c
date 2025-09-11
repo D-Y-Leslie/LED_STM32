@@ -33,7 +33,12 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+// 定义绘图区域的边界
+#define GRAPH_X_START 15  // Y轴标签占了左边一些空间
+#define GRAPH_Y_START 15  // 状态栏占了顶部一些空间
+#define GRAPH_WIDTH   110 // 图表宽度
+#define GRAPH_HEIGHT  100 // 图表高度
+#define GRAPH_Y_END   (GRAPH_Y_START + GRAPH_HEIGHT)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -183,13 +188,13 @@ for(int i=0; i<WAVEFORM_LENGTH; i++) {
           zoom_level += delta;
           if (zoom_level < 1) zoom_level = 1;
           if (zoom_level > 8) zoom_level = 8; // 增加最大缩放
-      } else {
+        } else {
           // --- 平移模式 ---
           data_offset -= delta * 5; // 乘以一个系数让平移更快
-          // *** 关键：添加边界检查 ***
+          // *** 关键：更新边界检查 ***
           if (data_offset < 0) data_offset = 0;
-          // 缓冲区总长256，屏幕宽128，所以最大偏移是 256-128 = 128
-          if (data_offset > (WAVEFORM_LENGTH - 128)) data_offset = (WAVEFORM_LENGTH - 128);
+          // 缓冲区总长 WAVEFORM_LENGTH，屏幕上显示 GRAPH_WIDTH 个点
+          if (data_offset > (WAVEFORM_LENGTH - GRAPH_WIDTH)) data_offset = (WAVEFORM_LENGTH - GRAPH_WIDTH);
       }
       last_encoder_counter = encoder_counter;
   }
@@ -383,63 +388,84 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
 void draw_waveform(u8g2_t* u8g2, uint8_t* data, const char* title, int zoom, DisplayMode mode)
 {
-  // 先清除缓冲区
+  char buffer[20]; // 一个通用的字符串缓冲区
+
+  // 1. 清空缓冲区
   u8g2_ClearBuffer(u8g2);
-  // 统一设置本次绘图的字体
-  u8g2_SetFont(u8g2, u8g2_font_ncenB08_tr);
 
-  // --- 1. 绘制状态栏 (顶部) ---
-  u8g2_DrawStr(u8g2, 2, 10, title); // 绘制标题
+  // 2. 绘制全新的顶部状态栏
+  u8g2_SetFont(u8g2, u8g2_font_ncenB08_tr); // 设置状态栏字体
 
-  // 根据当前的控制模式，显示 Zoom 或 Pan 的信息
-  if (control_mode == MODE_ZOOM) {
-      char zoom_str[12];
-      sprintf(zoom_str, "Zoom: x%d", zoom);
-      u8g2_uint_t str_width = u8g2_GetStrWidth(u8g2, zoom_str);
-      u8g2_DrawStr(u8g2, 127 - str_width, 10, zoom_str);
-  } else { // MODE_PAN
-      char pan_str[15];
-      sprintf(pan_str, "Pan: %ld", data_offset);
-      u8g2_uint_t str_width = u8g2_GetStrWidth(u8g2, pan_str);
-      u8g2_DrawStr(u8g2, 127 - str_width, 10, pan_str);
-  }
-  u8g2_DrawHLine(u8g2, 0, 12, 128); // 状态栏下方的分割线
-
-  // --- 2. 绘制Y轴 ---
-  // 【修改点】移除了绘制背景网格的循环，只保留一根Y轴
-  u8g2_DrawVLine(u8g2, 5, 14, 114);
-
-
-  // --- 3. 绘制波形 ---
-  for (int x = 0; x < 127; x++) { // 循环到127，避免 data[x+1] 越界
-      // 从数据缓冲区中根据偏移量取值
-      // 注意：这里的Y轴计算逻辑保持不变
-      int y1 = 64 - (data[x + data_offset] - 32) * zoom;
-      int y2 = 64 - (data[x + 1 + data_offset] - 32) * zoom;
-
-      // 将Y值限制在绘图区域内 (14 到 127 像素)
-      if(y1 < 14) y1 = 14;
-      if(y1 > 127) y1 = 127;
-      if(y2 < 14) y2 = 14;
-      if(y2 > 127) y2 = 127;
-
-      u8g2_DrawLine(u8g2, x, y1, x + 1, y2);
-  }
-
-  // --- 4. 绘制Y轴单位 (最后绘制，确保在最上层) ---
-  // 【修改点】根据传入的 mode 决定显示 'H' 还是 'T'，并移除了底部的单位
-  u8g2_SetFont(u8g2, u8g2_font_t0_11_tr); // 使用小字体
+  // 【修改点】将标题和实时数值合并显示在左侧
+  uint8_t current_raw_value = data[data_offset + GRAPH_WIDTH / 2];
   if (mode == DISPLAY_HEART_RATE) {
-      u8g2_DrawStr(u8g2, 8, 24, "H"); // 在轴顶部附近显示 'H'
+      int current_hr = 60 + (current_raw_value / 4);
+      sprintf(buffer, "HR: %d bpm", current_hr);
   } else { // DISPLAY_TEMPERATURE
-      u8g2_DrawStr(u8g2, 8, 24, "T"); // 在轴顶部附近显示 'T'
+      float current_temp = 35.0f + (current_raw_value / 5.0f);
+      sprintf(buffer, "Temp: %.1fC", current_temp); // 使用 %.1f 并开启了浮点支持
+  }
+  u8g2_DrawStr(u8g2, 2, 10, buffer); // 在左上角绘制
+
+  // 【修改点】将Zoom/Pan状态显示在状态栏右侧
+  if (control_mode == MODE_ZOOM) {
+      sprintf(buffer, "Zoom:x%d", zoom);
+  } else { // MODE_PAN
+      sprintf(buffer, "Pan:%ld", data_offset);
+  }
+  u8g2_uint_t str_width = u8g2_GetStrWidth(u8g2, buffer);
+  u8g2_DrawStr(u8g2, 127 - str_width, 10, buffer); // 在右上角绘制
+
+  // 绘制状态栏下方的分割线
+  u8g2_DrawHLine(u8g2, 0, 12, 128);
+
+
+  // 3. 绘制坐标轴 (这部分代码保持不变)
+  u8g2_DrawVLine(u8g2, GRAPH_X_START, GRAPH_Y_START, GRAPH_HEIGHT);
+  u8g2_DrawHLine(u8g2, GRAPH_X_START, GRAPH_Y_END, GRAPH_WIDTH);
+
+
+  // 4. 绘制坐标轴刻度与标签 (这部分代码保持不变)
+  u8g2_SetFont(u8g2, u8g2_font_t0_11_tr);
+  if (mode == DISPLAY_HEART_RATE) {
+      u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + 5, "120");
+      u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + GRAPH_HEIGHT / 2, "90");
+      u8g2_DrawStr(u8g2, 0, GRAPH_Y_END, "60");
+  } else {
+      u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + 5, "42");
+      u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + GRAPH_HEIGHT / 2, "38");
+      u8g2_DrawStr(u8g2, 0, GRAPH_Y_END, "35");
+  }
+  u8g2_DrawStr(u8g2, GRAPH_X_START, 127, "0s");
+  u8g2_DrawStr(u8g2, GRAPH_X_START + GRAPH_WIDTH / 2 - 5, 127, "5s");
+  // 【修改点】精确计算 "10s" 标签的位置，使其右对齐
+  u8g2_uint_t label_width = u8g2_GetStrWidth(u8g2, "10s");
+  u8g2_DrawStr(u8g2, GRAPH_X_START + GRAPH_WIDTH - label_width, 127, "10s");
+
+
+  // 5. 绘制波形 (这部分代码保持不变)
+  for (int x = 0; x < GRAPH_WIDTH -1; x++) {
+      uint8_t raw_y1 = data[x + data_offset];
+      uint8_t raw_y2 = data[x + 1 + data_offset];
+      int y1 = GRAPH_Y_END - (raw_y1 * GRAPH_HEIGHT / 64);
+      int y2 = GRAPH_Y_END - (raw_y2 * GRAPH_HEIGHT / 64);
+      int center_y = GRAPH_Y_END - (GRAPH_HEIGHT / 2) * (1.0/zoom);
+      y1 = center_y - (center_y - y1) * zoom;
+      y2 = center_y - (center_y - y2) * zoom;
+      if(y1 < GRAPH_Y_START) y1 = GRAPH_Y_START;
+      if(y1 > GRAPH_Y_END) y1 = GRAPH_Y_END;
+      if(y2 < GRAPH_Y_START) y2 = GRAPH_Y_START;
+      if(y2 > GRAPH_Y_END) y2 = GRAPH_Y_END;
+      u8g2_DrawLine(u8g2, GRAPH_X_START + x, y1, GRAPH_X_START + x + 1, y2);
   }
 
-  // --- 5. 将缓冲区内容发送到屏幕 ---
+  // 6. 将缓冲区内容发送到屏幕
   u8g2_SendBuffer(u8g2);
 }
+
 /* USER CODE END 4 */
 
 /**

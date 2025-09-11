@@ -197,41 +197,34 @@ void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin)
   // --- 编码器解码 ---
   if (GPIO_Pin == GPIO_PIN_15) // PA15 下降沿触发
   {
-    // 软件防抖
-    static uint32_t last_encoder_tick = 0;
-    if (HAL_GetTick() - last_encoder_tick > 5) // 5ms防抖
-    {
-      // 读取B相(PB4)的电平
-      if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) == GPIO_PIN_SET) {
-        encoder_counter++; // 顺时针
-      } else {
-        encoder_counter--; // 逆时针
+      // 软件防抖：确保两次中断之间有最小时间间隔
+      static uint32_t last_encoder_tick = 0;
+      if (HAL_GetTick() - last_encoder_tick > 5) // 5ms防抖，过滤机械抖动
+      {
+          // 读取B相(PB4)的电平来判断方向
+          if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_4) == GPIO_PIN_SET) {
+              encoder_counter++; // 顺时针
+          } else {
+              encoder_counter--; // 逆时针
+          }
+          last_encoder_tick = HAL_GetTick();
       }
-      last_encoder_tick = HAL_GetTick();
-    }
-  }
-
-  // --- 按键处理 ---
-  if (GPIO_Pin == GPIO_PIN_3) // PB3 下降沿触发
-  {
-    // 软件防抖
-    static uint32_t last_button_tick = 0;
-    if (HAL_GetTick() - last_button_tick > 200) // 200ms防抖
-    {
-      button_pressed = 1;
-      last_button_tick = HAL_GetTick();
-    }
   }
 
   // --- 按键处理 ---
   if (GPIO_Pin == GPIO_PIN_3) // PB3 下降沿触发 (按键按下)
   {
-      // 记录按键按下的时间点
-      button_press_time = HAL_GetTick();
-      // 设置一个临时的按下标志
-      button_pressed = 1;
+      // 软件防抖
+      static uint32_t last_button_tick = 0;
+      if (HAL_GetTick() - last_button_tick > 50) // 50ms防抖，防止一次按下多次触发
+      {
+          // 记录按键按下的时间点，用于主循环判断长短按
+          button_press_time = HAL_GetTick();
+          // 设置按键标志
+          button_pressed = 1;
+          last_button_tick = HAL_GetTick();
+      }
   }
-
 }
 
 
