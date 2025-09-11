@@ -52,6 +52,7 @@ TIM_HandleTypeDef htim16;
 volatile int32_t encoder_counter = 0;
 volatile uint8_t button_pressed = 0;
 volatile int32_t data_offset = 0;
+volatile uint32_t button_press_time = 0;
 
 // 定义显示模式
 typedef enum {
@@ -61,6 +62,15 @@ typedef enum {
 
 DisplayMode current_mode = DISPLAY_HEART_RATE;
 int zoom_level = 1; // 缩放级别，1为不缩放
+
+// 定义编码器控制模式
+typedef enum {
+    MODE_ZOOM,
+    MODE_PAN
+} ControlMode;
+
+volatile ControlMode control_mode = MODE_ZOOM; // 默认是缩放模式
+volatile uint8_t long_press_detected = 0;
 
 //暂时没有真实数据，我们先创建一些模拟数据来绘制。
 #define WAVEFORM_LENGTH 128
@@ -132,28 +142,55 @@ for(int i=0; i<WAVEFORM_LENGTH; i++) {
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    /* USER CODE END WHILE */
+  /* USER CODE END WHILE */
   // --- 处理输入 ---
   if (button_pressed) {
-      button_pressed = 0; // 清除标志
-      if (current_mode == DISPLAY_HEART_RATE) {
-          current_mode = DISPLAY_TEMPERATURE;
-      } else {
-          current_mode = DISPLAY_HEART_RATE;
+      // 等待一小段时间，看看按键是否被释放
+      HAL_Delay(20); // 简单的延时防抖
+
+      // 如果按键仍然被按着 (低电平)
+      if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_3) == GPIO_PIN_RESET) {
+          // 检查按下时间是否超过长按阈值 (例如 800ms)
+          if (HAL_GetTick() - button_press_time > 800) {
+              // --- 长按事件 ---
+              if (control_mode == MODE_ZOOM) {
+                  control_mode = MODE_PAN;
+              } else {
+                  control_mode = MODE_ZOOM;
+              }
+              // 等待按键释放
+              while(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_3) == GPIO_PIN_RESET);
+              button_pressed = 0; // 处理完毕，清除标志
+          }
+      } else { // 如果按键已经被释放，说明是短按
+          // --- 短按事件 ---
+          if (current_mode == DISPLAY_HEART_RATE) {
+              current_mode = DISPLAY_TEMPERATURE;
+          } else {
+              current_mode = DISPLAY_HEART_RATE;
+          }
+          button_pressed = 0; // 处理完毕，清除标志
       }
   }
 
-  // 假设我们用编码器来调整缩放
-  // 为了避免值变化太快，我们保存上一次的值
+  // --- 处理编码器 ---
   static int32_t last_encoder_counter = 0;
   if (encoder_counter != last_encoder_counter) {
-      if (encoder_counter > last_encoder_counter) {
-          zoom_level++; // 顺时针，放大
+      int32_t delta = encoder_counter - last_encoder_counter;
+
+      if (control_mode == MODE_ZOOM) {
+          // --- 缩放模式 ---
+          zoom_level += delta;
+          if (zoom_level < 1) zoom_level = 1;
+          if (zoom_level > 8) zoom_level = 8; // 增加最大缩放
       } else {
-          zoom_level--; // 逆时针，缩小
+          // --- 平移模式 ---
+          data_offset -= delta * 5; // 乘以一个系数让平移更快
+          // *** 关键：添加边界检查 ***
+          if (data_offset < 0) data_offset = 0;
+          // 缓冲区总长256，屏幕宽128，所以最大偏移是 256-128 = 128
+          if (data_offset > (WAVEFORM_LENGTH - 128)) data_offset = (WAVEFORM_LENGTH - 128);
       }
-      if (zoom_level < 1) zoom_level = 1; // 最小缩放为1
-      if (zoom_level > 5) zoom_level = 5; // 最大缩放为5
       last_encoder_counter = encoder_counter;
   }
 
@@ -346,69 +383,70 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
 void draw_waveform(u8g2_t* u8g2, uint8_t* data, const char* title, int zoom)
 {
-    u8g2_ClearBuffer(u8g2);
-    // 在 u8g2_ClearBuffer 之后
-    u8g2_DrawVLine(u8g2, 5, 15, 110); // 在x=5位置，画一条从y=15到y=125的线 
-    char val_str[10];
-    // 假设屏幕中央对应1.65V，zoom=1时满幅对应3.3V
-    float max_val = 1.65 + 1.65 / zoom;
-    float min_val = 1.65 - 1.65 / zoom;
-    sprintf(val_str, "%.1fV", max_val);
-    u8g2_DrawStr(u8g2, 7, 25, val_str); // 在轴顶部显示
-    sprintf(val_str, "%.1fV", min_val);
-    u8g2_DrawStr(u8g2, 7, 125, val_str); // 在轴底部显示
+  // 先清除缓冲区
+  u8g2_ClearBuffer(u8g2);
+  // 统一设置本次绘图的字体
+  u8g2_SetFont(u8g2, u8g2_font_ncenB08_tr);
 
-    u8g2_SetFont(u8g2, u8g2_font_ncenB08_tr);
+  // --- 1. 绘制状态栏 (顶部) ---
+  u8g2_DrawStr(u8g2, 2, 10, title); // 绘制标题
 
-    // 绘制标题
-    u8g2_DrawStr(u8g2, 0, 10, title);
+  // 根据当前的控制模式，显示 Zoom 或 Pan 的信息
+  if (control_mode == MODE_ZOOM) {
+      char zoom_str[12];
+      sprintf(zoom_str, "Zoom: x%d", zoom);
+      u8g2_uint_t str_width = u8g2_GetStrWidth(u8g2, zoom_str);
+      u8g2_DrawStr(u8g2, 127 - str_width, 10, zoom_str);
+  } else { // MODE_PAN
+      char pan_str[15];
+      // 注意: %ld 用于打印 long int, 我们的 data_offset 是 int32_t
+      sprintf(pan_str, "Pan: %ld", data_offset);
+      u8g2_uint_t str_width = u8g2_GetStrWidth(u8g2, pan_str);
+      u8g2_DrawStr(u8g2, 127 - str_width, 10, pan_str);
+  }
+  u8g2_DrawHLine(u8g2, 0, 12, 128); // 状态栏下方的分割线
 
-    // 绘制缩放级别
-    char zoom_str[10];
-    sprintf(zoom_str, "x%d", zoom); // 我们可以只显示 "x2", "x3" 更简洁
+  // --- 2. 绘制背景网格和Y轴 ---
+  // 绘制垂直网格线
+  for (int x = 0; x < 128; x += 16) {
+      u8g2_DrawVLine(u8g2, x, 14, 114);
+  }
+  // 绘制Y轴 (加粗一点)
+  u8g2_DrawVLine(u8g2, 5, 14, 114);
+  u8g2_DrawVLine(u8g2, 6, 14, 114);
 
-    // 计算字符串的像素宽度
-    u8g2_uint_t str_width = u8g2_GetStrWidth(u8g2, zoom_str);
 
-    // 从屏幕最右边(127)减去宽度，得到起始X坐标
-    u8g2_DrawStr(u8g2, 127 - str_width, 10, zoom_str);
+  // --- 3. 绘制波形 ---
+  for (int x = 0; x < 127; x++) { // 循环到127，避免 data[x+1] 越界
+      // 从数据缓冲区中根据偏移量取值
+      int y1 = 64 - (data[x + data_offset] - 32) * zoom;
+      int y2 = 64 - (data[x + 1 + data_offset] - 32) * zoom;
 
-    // 如果你还想显示 "Zoom:" 标签，可以把它放在左边
-    u8g2_DrawStr(u8g2, 80, 10, "Zoom:");
+      // 将Y值限制在绘图区域内 (14 到 127 像素)
+      if(y1 < 14) y1 = 14;
+      if(y1 > 127) y1 = 127;
+      if(y2 < 14) y2 = 14;
+      if(y2 > 127) y2 = 127;
 
-    // 在绘制波形前
-    u8g2_SetDrawColor(u8g2, 1); // 设置为前景色
-    // 绘制水平线
-    for (int y = 32; y < 128; y += 16) {
-        u8g2_DrawHLine(u8g2, 0, y, 128);
-    }
-    // 绘制垂直线
-    for (int x = 0; x < 128; x += 16) {
-        u8g2_DrawVLine(u8g2, x, 15, 113);
-    }
+      u8g2_DrawLine(u8g2, x, y1, x + 1, y2);
+  }
 
-    // 绘制波形
-    for (int x = 0; x < WAVEFORM_LENGTH - 1; x++) {
-        // 简单的缩放逻辑：以屏幕中心为基准进行缩放
-        int y1 = 64 - (data[x + data_offset] - 32) * zoom;
-        int y2 = 64 - (data[x + 1 + data_offset] - 32) * zoom;
+  // --- 4. 绘制Y轴刻度值 (最后绘制，确保在最上层) ---
+  char val_str[10];
+  float max_val = 1.65f + 1.65f / zoom;
+  float min_val = 1.65f - 1.65f / zoom;
+  // 使用更小的字体显示坐标值
+  u8g2_SetFont(u8g2, u8g2_font_t0_11_tr);
+  sprintf(val_str, "%.1fV", max_val);
+  u8g2_DrawStr(u8g2, 8, 24, val_str); // 在轴顶部附近显示
+  sprintf(val_str, "%.1fV", min_val);
+  u8g2_DrawStr(u8g2, 8, 125, val_str); // 在轴底部附近显示
 
-        // 限制在屏幕范围内
-        if(y1 < 12) y1 = 12;
-        if(y1 > 127) y1 = 127;
-
-        if(y2 < 12) y2 = 12;
-        if(y2 > 127) y2 = 127;
-
-        u8g2_DrawLine(u8g2, x, y1, x + 1, y2);
-    }
-
-    u8g2_SendBuffer(u8g2);
+  // --- 5. 将缓冲区内容发送到屏幕 ---
+  u8g2_SendBuffer(u8g2);
 }
-
 /* USER CODE END 4 */
 
 /**
