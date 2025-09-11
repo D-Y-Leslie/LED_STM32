@@ -430,43 +430,43 @@ void draw_waveform(u8g2_t* u8g2, uint8_t* data, const char* title, int zoom, Dis
   uint8_t raw_center_value = data[data_offset + GRAPH_WIDTH / 2];
 
   if (mode == DISPLAY_HEART_RATE) {
-      const float base_min = 60.0f;
-      const float base_max = 120.0f;
+    const float base_min = 60.0f;
+    const float base_max = 120.0f;
       
-      // <<< MODIFIED: 计算动态中心点的真实物理值
-      dynamic_center = 60.0f + (raw_center_value / 4.0f);
+    // <<< MODIFIED: 计算动态中心点的真实物理值
+    dynamic_center = 60.0f + (raw_center_value / 4.0f);
 
-      float span = (base_max - base_min) / zoom; // 新的跨度
-      
-      // <<< MODIFIED: 围绕动态中心点计算Y轴范围
-      y_max = dynamic_center + span / 2.0f;
-      y_min = dynamic_center - span / 2.0f;
-      y_mid = dynamic_center;
+    float span = (base_max - base_min) / zoom; // 新的跨度
+    
+    // <<< MODIFIED: 围绕动态中心点计算Y轴范围
+    y_max = dynamic_center + span / 2.0f;
+    y_min = dynamic_center - span / 2.0f;
+    y_mid = dynamic_center;
 
-      // 绘制动态标签
-      u8g2_SetFont(u8g2, u8g2_font_t0_11_tr);
-      sprintf(buffer, "%.0f", y_max); u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + 5, buffer);
-      sprintf(buffer, "%.0f", y_mid); u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + GRAPH_HEIGHT / 2, buffer);
-      sprintf(buffer, "%.0f", y_min); u8g2_DrawStr(u8g2, 0, GRAPH_Y_END, buffer);
+    // 绘制动态标签
+    u8g2_SetFont(u8g2, u8g2_font_t0_11_tr);
+    sprintf(buffer, "%.0f", y_max); u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + 5, buffer);
+    sprintf(buffer, "%.0f", y_mid); u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + GRAPH_HEIGHT / 2, buffer);
+    sprintf(buffer, "%.0f", y_min); u8g2_DrawStr(u8g2, 0, GRAPH_Y_END, buffer);
   } else { // DISPLAY_TEMPERATURE
-      const float base_min = 35.0f;
-      const float base_max = 42.0f;
+    const float base_min = 35.0f;
+    const float base_max = 42.0f;
 
-      // <<< MODIFIED: 计算动态中心点的真实物理值
-      dynamic_center = 35.0f + (raw_center_value / 5.0f);
+    // <<< MODIFIED: 计算动态中心点的真实物理值
+    dynamic_center = 35.0f + (raw_center_value / 5.0f);
 
-      float span = (base_max - base_min) / zoom;
-      
-      // <<< MODIFIED: 围绕动态中心点计算Y轴范围
-      y_max = dynamic_center + span / 2.0f;
-      y_min = dynamic_center - span / 2.0f;
-      y_mid = dynamic_center;
+    float span = (base_max - base_min) / zoom;
+    
+    // <<< MODIFIED: 围绕动态中心点计算Y轴范围
+    y_max = dynamic_center + span / 2.0f;
+    y_min = dynamic_center - span / 2.0f;
+    y_mid = dynamic_center;
 
-      // 绘制动态标签
-      u8g2_SetFont(u8g2, u8g2_font_t0_11_tr);
-      sprintf(buffer, "%.1f", y_max); u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + 5, buffer);
-      sprintf(buffer, "%.1f", y_mid); u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + GRAPH_HEIGHT / 2, buffer);
-      sprintf(buffer, "%.1f", y_min); u8g2_DrawStr(u8g2, 0, GRAPH_Y_END, buffer);
+    // 绘制动态标签
+    u8g2_SetFont(u8g2, u8g2_font_t0_11_tr);
+    sprintf(buffer, "%.1f", y_max); u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + 5, buffer);
+    sprintf(buffer, "%.1f", y_mid); u8g2_DrawStr(u8g2, 0, GRAPH_Y_START + GRAPH_HEIGHT / 2, buffer);
+    sprintf(buffer, "%.1f", y_min); u8g2_DrawStr(u8g2, 0, GRAPH_Y_END, buffer);
   }
 
   // 绘制X轴标签 (逻辑不变)
@@ -475,31 +475,47 @@ void draw_waveform(u8g2_t* u8g2, uint8_t* data, const char* title, int zoom, Dis
   u8g2_DrawStr(u8g2, GRAPH_X_START + GRAPH_WIDTH / 2 - 5, 127, "5s");
   u8g2_DrawStr(u8g2, GRAPH_X_START + GRAPH_WIDTH - label_width, 127, "10s");
 
-  // 波形映射和绘制部分完全不需要修改，因为它已经使用了 y_min 和 y_max，
-  // 现在这两个值是动态的，所以绘制会自动适应。
+  // ====================================================================
+  // 【核心修改】使用新的动态范围来映射和绘制波形 (带钳位逻辑)
+  // ====================================================================
   for (int x = 0; x < GRAPH_WIDTH - 1; x++) {
-      uint8_t raw_val1 = data[x + data_offset];
-      uint8_t raw_val2 = data[x + 1 + data_offset];
+    // 1. 获取原始数据 (这部分不变)
+    // 【修改后】
+    uint8_t raw_val1 = data[(x + data_offset) % WAVEFORM_LENGTH];
+    uint8_t raw_val2 = data[(x + 1 + data_offset) % WAVEFORM_LENGTH];
 
-      float real_val1, real_val2;
-      if (mode == DISPLAY_HEART_RATE) {
-          real_val1 = 60.0f + (raw_val1 / 4.0f);
-          real_val2 = 60.0f + (raw_val2 / 4.0f);
-      } else {
-          real_val1 = 35.0f + (raw_val1 / 5.0f);
-          real_val2 = 35.0f + (raw_val2 / 5.0f);
-      }
+    // 2. 将原始数据转换为真实的物理值 (这部分不变)
+    float real_val1, real_val2;
+    if (mode == DISPLAY_HEART_RATE) {
+        real_val1 = 60.0f + (raw_val1 / 4.0f);
+        real_val2 = 60.0f + (raw_val2 / 4.0f);
+    } else {
+        real_val1 = 35.0f + (raw_val1 / 5.0f);
+        real_val2 = 35.0f + (raw_val2 / 5.0f);
+    }
 
-      float y_span = y_max - y_min;
-      if (y_span < 0.001) y_span = 0.001;
+    // 3. 将真实的物理值映射到屏幕像素Y坐标 (这部分不变)
+    float y_span = y_max - y_min;
+    if (y_span < 0.001f) y_span = 0.001f; // 防止除以零
 
-      int y1 = GRAPH_Y_END - (int)((real_val1 - y_min) * GRAPH_HEIGHT / y_span);
-      int y2 = GRAPH_Y_END - (int)((real_val2 - y_min) * GRAPH_HEIGHT / y_span);
+    int y1 = GRAPH_Y_END - (int)((real_val1 - y_min) * GRAPH_HEIGHT / y_span);
+    int y2 = GRAPH_Y_END - (int)((real_val2 - y_min) * GRAPH_HEIGHT / y_span);
 
-      u8g2_DrawLine(u8g2, GRAPH_X_START + x, y1, GRAPH_X_START + x + 1, y2);
+    // ====================================================================
+    // 【新增部分】坐标钳位 (Clamping)
+    // ====================================================================
+    // 强制将y1和y2限制在图形区域内
+    if (y1 < GRAPH_Y_START) y1 = GRAPH_Y_START;
+    if (y1 > GRAPH_Y_END)   y1 = GRAPH_Y_END;
+    if (y2 < GRAPH_Y_START) y2 = GRAPH_Y_START;
+    if (y2 > GRAPH_Y_END)   y2 = GRAPH_Y_END;
+    // ====================================================================
+
+    // 4. 绘制线段 (现在是安全的)
+    u8g2_DrawLine(u8g2, GRAPH_X_START + x, y1, GRAPH_X_START + x + 1, y2);
   }
 
-  // 5. 将缓冲区内容发送到屏幕
+  // 5. 将缓冲区内容发送到屏幕 (这部分不变)
   u8g2_SendBuffer(u8g2);
 }
 
