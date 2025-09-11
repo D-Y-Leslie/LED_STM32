@@ -28,6 +28,7 @@
 /* USER CODE BEGIN TD */
 extern volatile int32_t encoder_counter;
 extern volatile uint8_t button_pressed;
+extern volatile uint32_t button_press_time; // 在 main.c 中定义
 /* USER CODE END TD */
 
 /* Private define ------------------------------------------------------------*/
@@ -221,6 +222,16 @@ void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin)
       last_button_tick = HAL_GetTick();
     }
   }
+
+  // --- 按键处理 ---
+  if (GPIO_Pin == GPIO_PIN_3) // PB3 下降沿触发 (按键按下)
+  {
+      // 记录按键按下的时间点
+      button_press_time = HAL_GetTick();
+      // 设置一个临时的按下标志
+      button_pressed = 1;
+  }
+
 }
 
 
